@@ -1,9 +1,9 @@
-using System.Collections;
 using System.Net;
 using System.Text.RegularExpressions;
 using Atriis.Api.Products.Contracts;
 using Atriis.Api.Products.Domain;
 using Atriis.Api.Products.Services.HostedServices;
+using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -11,6 +11,9 @@ namespace Atriis.Api.Products.Api;
 
 [ApiController]
 [Route("[controller]")]
+#if DEBUG
+[EnableCors]
+#endif
 public sealed class ProductsController : ControllerBase
 {
     private readonly ILogger<ProductsController> _logger;
@@ -25,7 +28,7 @@ public sealed class ProductsController : ControllerBase
     }
 
     [HttpGet(Name = "GetProducts")]
-    public IActionResult Get([FromQuery] string? name, [FromQuery] string? type, [FromQuery] bool? sortPriceAscending,
+    public IActionResult Get([FromQuery] string? name, [FromQuery(Name = "type")] string[] types, [FromQuery] bool? sortPriceAscending,
         [FromQuery] bool? sortNameAscending)
     {
         if (!_cache.TryGetValue(BbProductsSynchronizer.SynchronizedProducts, out var fromCache))
@@ -35,20 +38,20 @@ public sealed class ProductsController : ControllerBase
         if (fromCache is not IEnumerable<BbProduct> allProducts)
             return StatusCode((int)HttpStatusCode.InternalServerError,
                 "Invalid set of BestBuy's product, please contact system administrator");
-        
+
         var filtered = allProducts
             .Where(bbProduct =>
             {
                 var nameRegex = new Regex($".*{name}.*", RegexOptions.IgnoreCase);
                 return name == default || nameRegex.IsMatch(bbProduct.Name ?? string.Empty);
             })
-            .Where(bbProduct => type == default || bbProduct.Type == type)
+            .Where(bbProduct => !types.Any() || types.Contains(bbProduct.Type))
             .Select(bbProduct => new Product(bbProduct));
 
         var sorted = Sort(
-            Sort(filtered, sortPriceAscending, e => e.Price),
-            sortNameAscending,
-            e => e.Name
+            Sort(filtered, sortNameAscending, e => e.Name),
+            sortPriceAscending,
+            e => e.Price
         );
         
         return Ok(sorted);
